@@ -64,13 +64,6 @@
 #include "cheatsheet/cheatsheet_dialog.h"
 #include "colormap_editor.h"
 
-#ifdef COMPILED_WITH_CATKIN
-
-#endif
-#ifdef COMPILED_WITH_AMENT
-#include <ament_index_cpp/get_package_prefix.hpp>
-#include <ament_index_cpp/get_package_share_directory.hpp>
-#endif
 
 // Serialize a QDomDocument to XML with attributes in sorted order.
 // Qt's QDomDocument::toString() uses a hash map for attributes, producing
@@ -652,38 +645,35 @@ void MainWindow::loadAllPlugins(QStringList command_line_plugin_folders)
   builtin_folders += QCoreApplication::applicationDirPath();
   builtin_folders += PJ_PLUGIN_INSTALL_DIRECTORY;
 
-  try
-  {
 #ifdef COMPILED_WITH_CATKIN
-    builtin_folders += QCoreApplication::applicationDirPath() + "_ros";
+  builtin_folders += QCoreApplication::applicationDirPath() + "_ros";
+#endif
 
-    const char* env = std::getenv("CMAKE_PREFIX_PATH");
-    if (env)
+  // Auto-discover plugins from sibling colcon/catkin packages by globbing
+  // <prefix>/lib/plotjuggler_*/ in each prefix on the relevant ROS env path.
+  // Plugin packages follow the convention of installing to lib/<package_name>/
+  // with names prefixed plotjuggler_*, so no opt-in is required.
+#if defined(COMPILED_WITH_CATKIN) || defined(COMPILED_WITH_AMENT)
+#ifdef COMPILED_WITH_CATKIN
+  const char* ros_prefix_env = std::getenv("CMAKE_PREFIX_PATH");
+#else
+  const char* ros_prefix_env = std::getenv("AMENT_PREFIX_PATH");
+#endif
+  if (ros_prefix_env)
+  {
+    QString prefix_paths = QString::fromStdString(ros_prefix_env);
+    prefix_paths.replace(";", ":");  // for windows
+    for (const auto& prefix : prefix_paths.split(":", PJ::SkipEmptyParts))
     {
-      QString env_catkin_paths = QString::fromStdString(env);
-      env_catkin_paths.replace(";", ":");  // for windows
-      auto catkin_paths = env_catkin_paths.split(":");
-
-      for (const auto& path : catkin_paths)
+      QDir lib_dir(prefix + "/lib");
+      for (const auto& subdir :
+           lib_dir.entryList({ "plotjuggler_*" }, QDir::Dirs | QDir::NoDotAndDotDot))
       {
-        builtin_folders += path + "/lib/plotjuggler_ros";
+        builtin_folders += lib_dir.filePath(subdir);
       }
     }
-#endif
-#ifdef COMPILED_WITH_AMENT
-    auto ros2_path = QString::fromStdString(ament_index_cpp::get_package_prefix("plotjuggler_ros"));
-    ros2_path += "/lib/plotjuggler_ros";
-    _plugin_manager.loadPluginsFromFolder(ros2_path);
-#endif
   }
-  catch (...)
-  {
-    QMessageBox::warning(nullptr, "Missing package [plotjuggler-ros]",
-                         "If you just upgraded from PlotJuggler 2.x to 3.x , try "
-                         "installing this package:\n\n"
-                         "sudo apt install ros-${ROS_DISTRO}-plotjuggler-ros",
-                         QMessageBox::Cancel, QMessageBox::Cancel);
-  }
+#endif
 
   builtin_folders +=
       QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/PlotJuggler";
